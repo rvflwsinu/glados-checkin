@@ -6,7 +6,7 @@ on:
   schedule:
     # UTC 时间 1:00 = 北京时间 9:00，每天执行
     # GitHub Actions 的 cron 使用 UTC 时间
-    - cron: '0 1 * * *'
+    - cron: '0 */6 * * *'
   
   # 允许手动触发，方便调试
   workflow_dispatch:
