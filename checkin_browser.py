@@ -125,7 +125,10 @@ def find_white_widget_box(page):
             x0, y0 = min(xs) * step, min(ys) * step
             print(f"[debug] CV定位到 widget 白框 {bw}x{bh} @({x0},{y0})", flush=True)
             return x0 + 26, y0 + bh / 2
-        print(f"[debug] CV最大白块 {bw}x{bh} 不符合 widget 尺寸", flush=True)
+        if not hasattr(find_white_widget_box, "_last_warn") or \
+                time.time() - find_white_widget_box._last_warn > 20:
+            find_white_widget_box._last_warn = time.time()
+            print(f"[debug] CV最大白块 {bw}x{bh} 不符合 widget 尺寸", flush=True)
     except Exception as e:
         print(f"[debug] CV定位异常: {e}", flush=True)
     return None
