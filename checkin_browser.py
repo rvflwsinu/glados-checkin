@@ -52,11 +52,39 @@ def build_macos_ua(browser_version):
     )
 
 
+def _dump_turnstile_debug(page):
+    """打印所有 frame 及可能的复选框元素，用于定位选择器问题"""
+    print("[debug] frame 结构:")
+    for f in page.frames:
+        print(f"  frame: {f.url[:100]}")
+        try:
+            inputs = f.locator("input").all()
+            for inp in inputs[:5]:
+                try:
+                    t = inp.get_attribute("type")
+                    cls = inp.get_attribute("class") or ""
+                    vis = inp.is_visible()
+                    print(f"    input type={t} class={cls[:30]} visible={vis}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    try:
+        page.screenshot(path="debug-turnstile-state.png")
+        print("[debug] 已保存 debug-turnstile-state.png")
+    except Exception:
+        pass
+
+
 def click_turnstile_checkbox(page, timeout_s=25):
     """检测 Turnstile 交互式复选框并点击。返回是否点击成功。
-    页面加载后 widget 即渲染; 若 Cloudflare 要求交互, 复选框会出现在嵌套 iframe 中。"""
+    策略: 1) 在嵌套 iframe 中找 input[type=checkbox]
+          2) 坐标点击 widget iframe 左侧的复选框区域(跨域通用)"""
     deadline = time.time() + timeout_s
-    while time.time() < deadline:
+    last_dump = 0.0
+    clicked = False
+    while time.time() < deadline and not clicked:
+        # 策略1: 元素定位
         for frame in page.frames:
             if "challenges.cloudflare.com" not in frame.url:
                 continue
@@ -64,12 +92,38 @@ def click_turnstile_checkbox(page, timeout_s=25):
                 box = frame.locator("input[type='checkbox']").first
                 if box.count() > 0 and box.is_visible() and box.is_enabled():
                     box.click(timeout=3000)
-                    print("[debug] 已点击 Turnstile 复选框")
-                    return True
+                    print("[debug] 已点击 Turnstile 复选框(元素定位)")
+                    clicked = True
+                    break
             except Exception:
                 pass
+        if clicked:
+            break
+        # 策略2: 坐标定位 — widget iframe 展开(宽>250)即处于交互状态,
+        # 复选框位于 iframe 内左侧约 (24, 高/2) 处
+        try:
+            frames_el = page.locator("iframe").all()
+            for el in frames_el:
+                src = el.get_attribute("src") or ""
+                if "challenges.cloudflare.com" not in src:
+                    continue
+                bb = el.bounding_box()
+                if bb and bb["width"] >= 250 and bb["height"] >= 50:
+                    page.mouse.click(bb["x"] + 26, bb["y"] + bb["height"] / 2)
+                    print(f"[debug] 已按坐标点击 Turnstile 复选框 "
+                          f"({int(bb['width'])}x{int(bb['height'])})")
+                    clicked = True
+                    break
+        except Exception:
+            pass
+        if clicked:
+            break
+        # 每 15s 输出一次诊断
+        if time.time() - last_dump > 15:
+            last_dump = time.time()
+            _dump_turnstile_debug(page)
         page.wait_for_timeout(500)
-    return False
+    return clicked
 
 
 def checkin_one(email, cookie, user_agent):
