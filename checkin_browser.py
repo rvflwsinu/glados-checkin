@@ -121,15 +121,17 @@ def click_turnstile_checkbox(page, timeout_s=25):
             }"""
             iframes = page.evaluate(js) or []
             for info in iframes:
-                if "challenges.cloudflare.com" not in info["src"]:
-                    continue
-                print(f"[debug] widget iframe: {info['w']}x{info['h']} "
-                      f"({info['x']},{info['y']}) visible={info['visible']}")
+                is_cf = "challenges.cloudflare.com" in info["src"]
+                # 限制输出频率: 仅 Cloudflare iframe 或每 10s 打印一次汇总
+                if is_cf or time.time() - last_dump > 10:
+                    print(f"[debug] iframe: {info['w']}x{info['h']} "
+                          f"({info['x']},{info['y']}) vis={info['visible']} "
+                          f"cf={is_cf} src={info['src'][:70]}")
                 if info["visible"] and info["w"] >= 200 and info["h"] >= 40:
                     page.mouse.click(info["x"] + 24, info["y"] + info["h"] / 2,
                                      delay=80)
-                    print(f"[debug] 已按坐标点击 Turnstile 复选框 "
-                          f"({info['w']}x{info['h']})")
+                    print(f"[debug] 已按坐标点击大 iframe 复选框区域 "
+                          f"({info['w']}x{info['h']}) cf={is_cf}")
                     clicked = True
                     break
         except Exception as e:
