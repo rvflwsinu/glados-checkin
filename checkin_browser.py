@@ -76,15 +76,76 @@ def _dump_turnstile_debug(page):
         pass
 
 
+def find_white_widget_box(page):
+    """截图并寻找 Turnstile 白底 widget 框 (暗色页面中唯一大块白色区域)。
+    返回 (cx, cy) 复选框中心点(页面CSS坐标) 或 None。"""
+    try:
+        from PIL import Image
+        import io
+        png = page.screenshot(full_page=False)
+        img = Image.open(io.BytesIO(png)).convert("RGB")
+        w, h = img.size
+        px = img.load()
+        # 白色掩码 (widget 背景 ~ #fafafa)
+        mask = set()
+        step = 2  # 降采样加速
+        for y in range(0, h, step):
+            for x in range(0, w, step):
+                r, g, b = px[x, y]
+                # widget 背景 ~ #fafafa; "Done for today" 按钮偏灰(<=236), 排除
+                if r > 240 and g > 240 and b > 238:
+                    mask.add((x // step, y // step))
+        if not mask:
+            return None
+        # 最大连通块 (4连通 BFS)
+        best = None
+        seen = set()
+        for p in list(mask):
+            if p in seen:
+                continue
+            stack = [p]
+            seen.add(p)
+            comp = []
+            while stack:
+                c = stack.pop()
+                comp.append(c)
+                cx, cy = c
+                for n in ((cx+1, cy), (cx-1, cy), (cx, cy+1), (cx, cy-1)):
+                    if n in mask and n not in seen:
+                        seen.add(n)
+                        stack.append(n)
+            if best is None or len(comp) > len(best):
+                best = comp
+        xs = [c[0] for c in best]
+        ys = [c[1] for c in best]
+        bw = (max(xs) - min(xs) + 1) * step
+        bh = (max(ys) - min(ys) + 1) * step
+        # Turnstile 交互框约 300x65; 放宽以覆盖收起态
+        if 120 <= bw <= 450 and 35 <= bh <= 120:
+            x0, y0 = min(xs) * step, min(ys) * step
+            print(f"[debug] CV定位到 widget 白框 {bw}x{bh} @({x0},{y0})", flush=True)
+            return x0 + 26, y0 + bh / 2
+        print(f"[debug] CV最大白块 {bw}x{bh} 不符合 widget 尺寸", flush=True)
+    except Exception as e:
+        print(f"[debug] CV定位异常: {e}", flush=True)
+    return None
+
+
 def click_turnstile_checkbox(page, timeout_s=25):
     """检测 Turnstile 交互式复选框并点击。返回是否点击成功。
-    策略: 1) 在嵌套 iframe 中找 input[type=checkbox]
-          2) 坐标点击 widget iframe 左侧的复选框区域(跨域通用)"""
+    策略: 1) CV 定位白色 widget 框并坐标点击(最可靠)
+          2) 在嵌套 iframe 中找 input[type=checkbox]"""
     deadline = time.time() + timeout_s
-    last_dump = 0.0
     clicked = False
     while time.time() < deadline and not clicked:
-        # 策略1: 元素定位
+        # 策略1: CV 坐标定位
+        pt = find_white_widget_box(page)
+        if pt:
+            page.mouse.click(pt[0], pt[1], delay=80)
+            print("[debug] 已按CV坐标点击 Turnstile 复选框", flush=True)
+            clicked = True
+            break
+        # 策略2: 元素定位
         for frame in page.frames:
             if "challenges.cloudflare.com" not in frame.url:
                 continue
@@ -92,57 +153,14 @@ def click_turnstile_checkbox(page, timeout_s=25):
                 box = frame.locator("input[type='checkbox']").first
                 if box.count() > 0 and box.is_visible() and box.is_enabled():
                     box.click(timeout=3000)
-                    print("[debug] 已点击 Turnstile 复选框(元素定位)")
+                    print("[debug] 已点击 Turnstile 复选框(元素定位)", flush=True)
                     clicked = True
                     break
             except Exception:
                 pass
         if clicked:
             break
-        # 策略2: 坐标定位 — 在主文档及嵌套文档中找 challenges iframe 元素
-        # 若 Cloudflare 判定需要交互, widget 会展开为 ~300x65 的验证框,
-        # 复选框位于框内左侧; 通过 CDP 穿透同源限制获取元素位置。
-        try:
-            js = """() => {
-                const out = [];
-                const scan = (doc, depth) => {
-                    if (!doc || depth > 4) return;
-                    for (const el of doc.querySelectorAll('iframe')) {
-                        const r = el.getBoundingClientRect();
-                        out.push({src: (el.src||'').slice(0,90),
-                                  w: Math.round(r.width), h: Math.round(r.height),
-                                  x: Math.round(r.x), y: Math.round(r.y),
-                                  visible: r.width>0 && r.height>0});
-                        try { scan(el.contentDocument, depth+1); } catch(e) {}
-                    }
-                };
-                scan(document, 0);
-                return out;
-            }"""
-            iframes = page.evaluate(js) or []
-            for info in iframes:
-                is_cf = "challenges.cloudflare.com" in info["src"]
-                # 限制输出频率: 仅 Cloudflare iframe 或每 10s 打印一次汇总
-                if is_cf or time.time() - last_dump > 10:
-                    print(f"[debug] iframe: {info['w']}x{info['h']} "
-                          f"({info['x']},{info['y']}) vis={info['visible']} "
-                          f"cf={is_cf} src={info['src'][:70]}")
-                if info["visible"] and info["w"] >= 200 and info["h"] >= 40:
-                    page.mouse.click(info["x"] + 24, info["y"] + info["h"] / 2,
-                                     delay=80)
-                    print(f"[debug] 已按坐标点击大 iframe 复选框区域 "
-                          f"({info['w']}x{info['h']}) cf={is_cf}")
-                    clicked = True
-                    break
-        except Exception as e:
-            print(f"[debug] 坐标点击异常: {e}")
-        if clicked:
-            break
-        # 每 15s 输出一次诊断
-        if time.time() - last_dump > 15:
-            last_dump = time.time()
-            _dump_turnstile_debug(page)
-        page.wait_for_timeout(500)
+        page.wait_for_timeout(1000)
     return clicked
 
 

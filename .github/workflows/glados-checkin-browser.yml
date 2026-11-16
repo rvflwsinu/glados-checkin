@@ -24,7 +24,7 @@ jobs:
 
       - name: 安装 Playwright 及 Chromium
         run: |
-          pip install playwright
+          pip install playwright pillow
           playwright install --with-deps chromium
 
       - name: 执行浏览器签到
