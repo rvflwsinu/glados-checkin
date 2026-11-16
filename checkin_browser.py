@@ -146,8 +146,15 @@ def checkin_one(email, cookie, user_agent):
             print(f"[debug] challenge code={challenge_info.get('code')}, "
                   f"turnstile={'需要' if need_ts else '不需要'}")
             if need_ts:
-                # 页面加载后 widget 已开始运行; 尝试提前点击复选框
-                click_turnstile_checkbox(page, timeout_s=8)
+                # 该 IP 被判为高风险时, Cloudflare 需要交互验证。
+                # 复选框可能要 30s+ 才出现; 提前点击使 tsToken 在签门前就绪。
+                print("[debug] 等待 Turnstile 复选框出现...")
+                if click_turnstile_checkbox(page, timeout_s=60):
+                    # 点击后 Cloudflare 需要几秒完成验证并回调 tsToken
+                    print("[debug] 等待 Turnstile 令牌验证 (10s)...")
+                    page.wait_for_timeout(10000)
+                else:
+                    print("[debug] 60s 内复选框未出现，将直接点击签到")
 
         # 找签到按钮
         btn = None
