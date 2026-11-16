@@ -43,6 +43,15 @@ def translate_result(data):
     return f"签到失败 (code={code}): {message or data} ❓"
 
 
+def build_macos_ua(browser_version):
+    """用真实浏览器版本构造 macOS Chrome UA，与登录设备保持一致"""
+    major = browser_version.split(".")[0]
+    return (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        f"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
+    )
+
+
 def checkin_one(email, cookie, user_agent):
     print(f"\n===== 账号 {email} =====")
     challenge_info = {}
@@ -59,7 +68,7 @@ def checkin_one(email, cookie, user_agent):
             ],
         )
         context = browser.new_context(
-            user_agent=user_agent,
+            user_agent=user_agent or build_macos_ua(browser.version),
             locale="zh-CN",
             timezone_id="Asia/Shanghai",
             viewport={"width": 1366, "height": 900},
@@ -196,11 +205,6 @@ def send_telegram(messages, bot_token, chat_id):
 
 
 def main():
-    user_agent = os.getenv("GLADOS_UA") or (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    )
-
     accounts = []
     i = 1
     while True:
@@ -215,6 +219,7 @@ def main():
         print("未找到账号信息，请检查环境变量")
         return
 
+    user_agent = os.getenv("GLADOS_UA") or None  # 默认在浏览器启动后按 macOS 构造
     results = []
     for email, cookie in accounts:
         results.append(checkin_one(email, cookie, user_agent))

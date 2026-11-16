@@ -10,7 +10,9 @@ on:
 jobs:
   checkin:
     name: 浏览器签到
-    runs-on: ubuntu-latest
+    # macOS runner: navigator.platform 为 MacIntel，与登录设备的 UA 一致，
+    # 避免 device-mismatch / Turnstile 指纹不一致
+    runs-on: macos-latest
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -36,8 +38,8 @@ jobs:
           GLADOS_UA: ${{ secrets.GLADOS_UA }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        # 使用 xvfb 虚拟显示以 headed 模式运行，降低被 Turnstile 识别的概率
-        run: xvfb-run -a python checkin_browser.py
+        # headed 模式运行，降低被 Turnstile 识别的概率
+        run: python checkin_browser.py
 
       - name: 上传调试截图
         if: always()
