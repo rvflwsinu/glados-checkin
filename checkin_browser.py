@@ -146,13 +146,8 @@ def checkin_one(email, cookie, user_agent):
             print(f"[debug] challenge code={challenge_info.get('code')}, "
                   f"turnstile={'需要' if need_ts else '不需要'}")
             if need_ts:
-                # 页面加载后 widget 已开始运行; 若需交互则点击复选框
-                # (在点击签到按钮之前完成, 使 tsToken 就绪)
-                clicked = click_turnstile_checkbox(page)
-                if not clicked:
-                    print("[debug] 未出现可点击的 Turnstile 复选框"
-                          "(可能已静默通过或超时)")
-                page.wait_for_timeout(1000)
+                # 页面加载后 widget 已开始运行; 尝试提前点击复选框
+                click_turnstile_checkbox(page, timeout_s=8)
 
         # 找签到按钮
         btn = None
@@ -185,10 +180,17 @@ def checkin_one(email, cookie, user_agent):
             browser.close()
             return f"<b>{email}</b>: 点击签到按钮失败 ❌"
 
-        # 等待签到 API 返回（Turnstile 可能需要几秒~几十秒）
-        deadline = time.time() + 90
+        # 等待签到 API 返回；期间若出现 Turnstile 复选框则立即点击。
+        # 前端在需要交互时最多等待 90s 才提交。
+        deadline = time.time() + 100
+        ts_clicked = False
         while time.time() < deadline and not checkin_results:
+            if not ts_clicked and challenge_info.get("turnstile"):
+                if click_turnstile_checkbox(page, timeout_s=3):
+                    ts_clicked = True
             page.wait_for_timeout(500)
+        if not ts_clicked and challenge_info.get("turnstile"):
+            print("[debug] 等待期间未点击到 Turnstile 复选框")
 
         # 多等一会儿让结算消息渲染
         page.wait_for_timeout(2000)
