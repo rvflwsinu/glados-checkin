@@ -99,22 +99,37 @@ def click_turnstile_checkbox(page, timeout_s=25):
                 pass
         if clicked:
             break
-        # 策略2: 坐标定位 — widget iframe 展开(宽>200)即处于交互状态,
-        # 复选框位于 iframe 内左侧约 (24, 高/2) 处
+        # 策略2: 坐标定位 — 在主文档及嵌套文档中找 challenges iframe 元素
+        # 若 Cloudflare 判定需要交互, widget 会展开为 ~300x65 的验证框,
+        # 复选框位于框内左侧; 通过 CDP 穿透同源限制获取元素位置。
         try:
-            frames_el = page.locator("iframe").all()
-            for el in frames_el:
-                src = el.get_attribute("src") or ""
-                if "challenges.cloudflare.com" not in src:
+            js = """() => {
+                const out = [];
+                const scan = (doc, depth) => {
+                    if (!doc || depth > 4) return;
+                    for (const el of doc.querySelectorAll('iframe')) {
+                        const r = el.getBoundingClientRect();
+                        out.push({src: (el.src||'').slice(0,90),
+                                  w: Math.round(r.width), h: Math.round(r.height),
+                                  x: Math.round(r.x), y: Math.round(r.y),
+                                  visible: r.width>0 && r.height>0});
+                        try { scan(el.contentDocument, depth+1); } catch(e) {}
+                    }
+                };
+                scan(document, 0);
+                return out;
+            }"""
+            iframes = page.evaluate(js) or []
+            for info in iframes:
+                if "challenges.cloudflare.com" not in info["src"]:
                     continue
-                bb = el.bounding_box()
-                print(f"[debug] widget iframe: {int(bb['width']) if bb else '?'}x"
-                      f"{int(bb['height']) if bb else '?'} src={src[:60]}")
-                if bb and bb["width"] >= 200 and bb["height"] >= 40:
-                    page.mouse.click(bb["x"] + 24, bb["y"] + bb["height"] / 2,
+                print(f"[debug] widget iframe: {info['w']}x{info['h']} "
+                      f"({info['x']},{info['y']}) visible={info['visible']}")
+                if info["visible"] and info["w"] >= 200 and info["h"] >= 40:
+                    page.mouse.click(info["x"] + 24, info["y"] + info["h"] / 2,
                                      delay=80)
                     print(f"[debug] 已按坐标点击 Turnstile 复选框 "
-                          f"({int(bb['width'])}x{int(bb['height'])})")
+                          f"({info['w']}x{info['h']})")
                     clicked = True
                     break
         except Exception as e:
