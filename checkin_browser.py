@@ -99,7 +99,7 @@ def click_turnstile_checkbox(page, timeout_s=25):
                 pass
         if clicked:
             break
-        # 策略2: 坐标定位 — widget iframe 展开(宽>250)即处于交互状态,
+        # 策略2: 坐标定位 — widget iframe 展开(宽>200)即处于交互状态,
         # 复选框位于 iframe 内左侧约 (24, 高/2) 处
         try:
             frames_el = page.locator("iframe").all()
@@ -108,14 +108,17 @@ def click_turnstile_checkbox(page, timeout_s=25):
                 if "challenges.cloudflare.com" not in src:
                     continue
                 bb = el.bounding_box()
-                if bb and bb["width"] >= 250 and bb["height"] >= 50:
-                    page.mouse.click(bb["x"] + 26, bb["y"] + bb["height"] / 2)
+                print(f"[debug] widget iframe: {int(bb['width']) if bb else '?'}x"
+                      f"{int(bb['height']) if bb else '?'} src={src[:60]}")
+                if bb and bb["width"] >= 200 and bb["height"] >= 40:
+                    page.mouse.click(bb["x"] + 24, bb["y"] + bb["height"] / 2,
+                                     delay=80)
                     print(f"[debug] 已按坐标点击 Turnstile 复选框 "
                           f"({int(bb['width'])}x{int(bb['height'])})")
                     clicked = True
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[debug] 坐标点击异常: {e}")
         if clicked:
             break
         # 每 15s 输出一次诊断
