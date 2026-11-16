@@ -52,6 +52,26 @@ def build_macos_ua(browser_version):
     )
 
 
+def click_turnstile_checkbox(page, timeout_s=25):
+    """检测 Turnstile 交互式复选框并点击。返回是否点击成功。
+    页面加载后 widget 即渲染; 若 Cloudflare 要求交互, 复选框会出现在嵌套 iframe 中。"""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        for frame in page.frames:
+            if "challenges.cloudflare.com" not in frame.url:
+                continue
+            try:
+                box = frame.locator("input[type='checkbox']").first
+                if box.count() > 0 and box.is_visible() and box.is_enabled():
+                    box.click(timeout=3000)
+                    print("[debug] 已点击 Turnstile 复选框")
+                    return True
+            except Exception:
+                pass
+        page.wait_for_timeout(500)
+    return False
+
+
 def checkin_one(email, cookie, user_agent):
     print(f"\n===== 账号 {email} =====")
     challenge_info = {}
@@ -125,6 +145,14 @@ def checkin_one(email, cookie, user_agent):
             need_ts = bool(challenge_info.get("turnstile"))
             print(f"[debug] challenge code={challenge_info.get('code')}, "
                   f"turnstile={'需要' if need_ts else '不需要'}")
+            if need_ts:
+                # 页面加载后 widget 已开始运行; 若需交互则点击复选框
+                # (在点击签到按钮之前完成, 使 tsToken 就绪)
+                clicked = click_turnstile_checkbox(page)
+                if not clicked:
+                    print("[debug] 未出现可点击的 Turnstile 复选框"
+                          "(可能已静默通过或超时)")
+                page.wait_for_timeout(1000)
 
         # 找签到按钮
         btn = None
@@ -220,9 +248,16 @@ def main():
         return
 
     user_agent = os.getenv("GLADOS_UA") or None  # 默认在浏览器启动后按 macOS 构造
+    retry_markers = ("Automated check-in", "Cloudflare verification failed",
+                     "未获取到签到结果", "点击签到按钮失败", "打开页面失败")
     results = []
     for email, cookie in accounts:
-        results.append(checkin_one(email, cookie, user_agent))
+        r = checkin_one(email, cookie, user_agent)
+        if any(m in r for m in retry_markers):
+            print(f"[warn] {email} 首次尝试失败，30 秒后重试一次...")
+            time.sleep(30)
+            r = checkin_one(email, cookie, user_agent)
+        results.append(r)
 
     send_telegram(results, os.getenv("TG_BOT_TOKEN"), os.getenv("TG_CHAT_ID"))
 
