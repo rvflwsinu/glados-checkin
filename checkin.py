@@ -25,7 +25,7 @@ def generate_headers(cookie):
     ]
     return {
         "Accept": "application/json, text/plain, */*",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": "gzip, deflate",
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "Content-Type": "application/json;charset=UTF-8",
         "Cookie": cookie,
@@ -69,19 +69,31 @@ def check_account_status(email, cookie):
     except Exception as e:
         return f"<b>{email}</b>: 获取状态失败 - {str(e)} ❌"
 
+def print_response_debug(response):
+    """请求失败时打印诊断信息，便于排查 Cloudflare 拦截等问题"""
+    try:
+        print(f"[debug] HTTP status: {response.status_code}")
+        print(f"[debug] headers: {dict(response.headers)}")
+        print(f"[debug] body[:500]: {response.text[:500]!r}")
+    except Exception as e:
+        print(f"[debug] 打印响应信息失败: {e}")
+
 def sign(email, cookie):
     url = "https://glados.cloud/api/user/checkin"         # ← 修复
     headers = generate_headers(cookie)
     data = {"token": "glados.cloud"}                       # ← 修复
+    response = None
     try:
         response = requests.post(url, headers=headers, json=data, timeout=15)
         response.raise_for_status()
         raw_message = response.json().get("message", "")
         translated_message = translate_message(raw_message)
-    except requests.RequestException as e:
+    except (requests.RequestException, ValueError) as e:
         translated_message = f"请求失败: {e}"
-    except ValueError:
-        translated_message = "解析响应失败"
+        if response is not None:
+            print_response_debug(response)
+        else:
+            print(f"[debug] 无响应对象，异常: {type(e).__name__}: {e}")
 
     beijing_time = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
     print(f"{beijing_time.strftime('%Y-%m-%d %H:%M')} {email}: {translated_message}")
