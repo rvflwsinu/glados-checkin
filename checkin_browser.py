@@ -84,7 +84,23 @@ def checkin_one(email, cookie, user_agent):
                 except Exception:
                     checkin_results.append({"_http": response.status})
 
+        def on_request(request):
+            url = request.url
+            if "/api/user/checkin" in url and "challenge" not in url:
+                try:
+                    import json as _json
+                    body = _json.loads(request.post_data or "{}")
+                    # 脱敏: 只显示令牌前 8 位
+                    if body.get("turnstile"):
+                        body["turnstile"] = body["turnstile"][:8] + "..."
+                    print(f"[debug] checkin 请求体: {body}")
+                except Exception:
+                    print(f"[debug] checkin 请求体无法解析: {request.post_data!r}")
+            if "challenges.cloudflare.com" in url:
+                print(f"[debug] turnstile 相关请求: {url[:100]}")
+
         page.on("response", on_response)
+        page.on("request", on_request)
         page.on("pageerror", lambda e: page_errors.append(str(e)))
 
         try:
@@ -142,7 +158,12 @@ def checkin_one(email, cookie, user_agent):
         if not checkin_results:
             print("[warn] 90 秒内未捕获到签到 API 响应")
             print(f"[debug] 页面可见文本: {page.locator('body').inner_text()[:500]}")
+        # 每次都截图，便于排查 Turnstile 状态
+        try:
             page.screenshot(path=f"debug-{email}.png", full_page=True)
+            print("[debug] 已保存截图 debug-" + email + ".png")
+        except Exception as e:
+            print(f"[debug] 截图失败: {e}")
 
         browser.close()
 
